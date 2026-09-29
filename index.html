@@ -1146,14 +1146,38 @@ Lab you po.</p>
     playActiveVideoIfAny();
     updateProgress();
   }
+  var carouselVideoWatchdog=null;
   function startCarouselAuto(){
     if(slides.length<2) return;
     clearInterval(carouselTimer);
+    if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
     var activeVideo=slides[curSlide].querySelector('video');
     if(activeVideo){
-      // let the video play to completion instead of cutting it off
-      var onEnded=function(){ activeVideo.removeEventListener('ended', onEnded); goToSlide(curSlide+1); startCarouselAuto(); };
-      activeVideo.addEventListener('ended', onEnded);
+      // Advance on ended/error, OR if autoplay is blocked (stays paused),
+      // OR after duration — so the carousel never gets stuck on a silent video.
+      var done=false;
+      var finish=function(){
+        if(done) return;
+        done=true;
+        if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
+        try{ activeVideo.removeEventListener('ended', finish); }catch(e){}
+        try{ activeVideo.removeEventListener('error', finish); }catch(e){}
+        goToSlide(curSlide+1);
+        startCarouselAuto();
+      };
+      activeVideo.addEventListener('ended', finish);
+      activeVideo.addEventListener('error', finish);
+      try{ playActiveVideoIfAny(); }catch(e){}
+      var waitMs=15000;
+      try{
+        if(activeVideo.readyState>=1 && isFinite(activeVideo.duration) && activeVideo.duration>0){
+          waitMs=Math.ceil(activeVideo.duration*1000)+2000;
+        }
+      }catch(e){}
+      carouselVideoWatchdog=setTimeout(finish, waitMs);
+      setTimeout(function(){
+        try{ if(!done && activeVideo.paused) finish(); }catch(e){ finish(); }
+      }, 3000);
     } else {
       carouselTimer=setInterval(function(){ goToSlide(curSlide+1); startCarouselAuto(); }, 3200);
     }
@@ -1212,10 +1236,15 @@ Lab you po.</p>
     if(celebration.dataset.musicArmed==='1') return;
     celebration.dataset.musicArmed='1';
     function unlock(e){
-      if(e && e.target && e.target.closest && e.target.closest('#closeCel')) return;
+      // Never intercept real controls — otherwise the sound button's own
+      // handler toggles sound right back off after we turn it on.
+      if(e && e.target && e.target.closest){
+        if(e.target.closest('#closeCel, #soundToggle, .video-mute, button, a, input')) return;
+      }
       celebration.removeEventListener('pointerdown', unlock, true);
       celebration.removeEventListener('touchstart', unlock, true);
       celebration.removeEventListener('click', unlock, true);
+      celebration.dataset.musicArmed='0';
       pageInteracted=true;
       applySoundOnUI();
       playChime();
@@ -1248,10 +1277,15 @@ Lab you po.</p>
       armCelebrationGestureMusic();
     }
     document.body.style.overflow='hidden';
+    // Past-target loads + blocked video autoplay used to leave the carousel frozen;
+    // kick once more on the next frame and again shortly after.
+    requestAnimationFrame(function(){ try{ startCarouselAuto(); }catch(e){} });
+    setTimeout(function(){ try{ startCarouselAuto(); }catch(e){} }, 500);
   }
   document.getElementById('closeCel').addEventListener('click', function(){
     celebration.classList.remove('show');
     clearInterval(carouselTimer);
+    if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
     stopBackgroundMusic();
     document.body.style.overflow='';
   });
