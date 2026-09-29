@@ -411,7 +411,7 @@
     <div class="line"></div>
   </div>
 
-  <div class="date-pill">Reunion set for <b>Sept 30, 2026</b> · 12:49 AM AEST</div>
+  <div class="date-pill">Reunion set for <b>Sept 30, 2026</b> · 12:55 AM AEST</div>
 </main>
 
 <footer class="tag">made with every bit of my heart, for you 🩷🩵</footer>
@@ -659,8 +659,8 @@ Lab you po.</p>
 (function(){
   "use strict";
 
-  /* ---------- target time: Sept 30 2026 00:49:00 AEST (UTC+10, fixed offset) ---------- */
-  var TARGET_UTC_MS = Date.UTC(2026,8,29,14,49,0); // Sep 30 00:49 AEST = Sep 29 14:49 UTC
+  /* ---------- target time: Sept 30 2026 00:55:00 AEST (UTC+10, fixed offset) ---------- */
+  var TARGET_UTC_MS = Date.UTC(2026,8,29,14,55,0); // Sep 30 00:55 AEST = Sep 29 14:55 UTC
 
   var dDays=document.getElementById('dDays'),
       dHours=document.getElementById('dHours'),
@@ -929,31 +929,43 @@ Lab you po.</p>
       }, 250);
     }catch(e){}
   }
+  function hasMediaGesture(){
+    if(pageInteracted || soundOn) return true;
+    try{
+      if(navigator.userActivation && navigator.userActivation.hasBeenActive) return true;
+    }catch(e){}
+    return false;
+  }
+  function applySoundOnUI(){
+    soundOn=true;
+    if(soundToggle){
+      soundToggle.textContent='🔊 Turn Sound off';
+      soundToggle.classList.remove('sound-pulse');
+    }
+    var hint=document.getElementById('soundHint');
+    if(hint) hint.style.display='none';
+  }
   function startBackgroundMusic(forceAudible){
     if(!bothReady()){ ytStartQueued=true; pendingForceAudible=!!forceAudible; return; }
     musicWanted=true;
-    var wantAudible = !!forceAudible && (soundOn || pageInteracted);
+    var wantAudible = !!forceAudible && hasMediaGesture();
     try{
       // Always begin muted so the track actually starts; then unmute if allowed
       ensureYtPlaying(false);
       if(wantAudible){
         ensureYtPlaying(true);
+        // optimistic UI — matches double-tap feel; verify a moment later
+        applySoundOnUI();
         setTimeout(function(){
           var actuallyPlaying=false;
           try{
             var p=activePlayer();
-            actuallyPlaying = p && !p.isMuted() && p.getPlayerState()===1;
+            actuallyPlaying = p && p.getPlayerState()===1;
+            if(actuallyPlaying && p.isMuted()){ p.unMute(); p.setVolume(MASTER_VOLUME); }
           }catch(e){}
-          if(actuallyPlaying){
-            soundOn=true;
-            if(soundToggle){
-              soundToggle.textContent='🔊 Turn Sound off';
-              soundToggle.classList.remove('sound-pulse');
-            }
-            var hint=document.getElementById('soundHint');
-            if(hint) hint.style.display='none';
-          } else if(soundToggle){
-            // keep the tap affordance obvious
+          if(!actuallyPlaying && soundToggle){
+            soundOn=false;
+            soundToggle.textContent='🔇 Turn Sound on';
             soundToggle.classList.add('sound-pulse');
           }
         }, 700);
@@ -973,6 +985,7 @@ Lab you po.</p>
 
 
   /* prime audio on first user interaction so later autoplay-with-sound is allowed by browser policy */
+  var audioCtx=null;
   var pageInteracted=false;
   function markInteracted(){
     if(pageInteracted) return;
@@ -980,13 +993,29 @@ Lab you po.</p>
     document.removeEventListener('click', markInteracted);
     document.removeEventListener('touchstart', markInteracted);
     document.removeEventListener('keydown', markInteracted);
+    // Prime under this gesture: muted YT + AudioContext, so the zero-hour
+    // unmute can succeed the same way a double-tap does.
+    try{
+      if(!audioCtx) audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+      if(audioCtx && audioCtx.state==='suspended') audioCtx.resume();
+    }catch(e){}
+    try{
+      if(bothReady()){
+        musicWanted=true;
+        ensureYtPlaying(false);
+        startPolling();
+      } else {
+        ytStartQueued=true;
+        // keep pendingForceAudible as-is; celebration may set it later
+      }
+    }catch(e){}
   }
   document.addEventListener('click', markInteracted, {passive:true});
   document.addEventListener('touchstart', markInteracted, {passive:true});
   document.addEventListener('keydown', markInteracted, {passive:true});
 
   /* ---------- sound (soft chime, gesture-gated, muted by default) ---------- */
-  var audioCtx=null, soundOn=false;
+  var soundOn=false;
   var soundToggle=document.getElementById('soundToggle');
   function playChime(){
     if(!soundOn) return;
@@ -1177,17 +1206,47 @@ Lab you po.</p>
   });
 
   /* ---------- celebration trigger ---------- */
+  function armCelebrationGestureMusic(){
+    // No prior gesture (pure timer fire): first tap/click anywhere on the
+    // overlay starts songs the same way double-tap does.
+    if(celebration.dataset.musicArmed==='1') return;
+    celebration.dataset.musicArmed='1';
+    function unlock(e){
+      if(e && e.target && e.target.closest && e.target.closest('#closeCel')) return;
+      celebration.removeEventListener('pointerdown', unlock, true);
+      celebration.removeEventListener('touchstart', unlock, true);
+      celebration.removeEventListener('click', unlock, true);
+      pageInteracted=true;
+      applySoundOnUI();
+      playChime();
+      startBackgroundMusic(true);
+      ensureYtPlaying(true);
+    }
+    celebration.addEventListener('pointerdown', unlock, true);
+    celebration.addEventListener('touchstart', unlock, {capture:true, passive:true});
+    celebration.addEventListener('click', unlock, true);
+  }
   function triggerCelebration(){
     if(celebrated) return;
     celebrated=true;
     clearInterval(timer);
     celebration.classList.add('show');
     launchConfetti();
-    // kick the carousel + any first-slide video immediately (autoplay may still need a tap for audio)
+    // kick the carousel + any first-slide video immediately
     try{ playActiveVideoIfAny(); }catch(e){}
     startCarouselAuto();
-    if(soundOn) playChime();
-    startBackgroundMusic(true);
+    // Double-tap works because it IS a gesture. Timer fire is not — so if the
+    // visitor already tapped during the countdown, unmute like double-tap;
+    // otherwise arm a one-tap unlock on the overlay.
+    if(hasMediaGesture()){
+      applySoundOnUI();
+      if(soundOn) playChime();
+      startBackgroundMusic(true);
+      ensureYtPlaying(true);
+    } else {
+      startBackgroundMusic(true); // muted start if the browser allows
+      armCelebrationGestureMusic();
+    }
     document.body.style.overflow='hidden';
   }
   document.getElementById('closeCel').addEventListener('click', function(){
@@ -1202,12 +1261,13 @@ Lab you po.</p>
   function handleDoubleTrigger(){
     var now=Date.now();
     if(now-lastTap<400){
+      pageInteracted=true; // this touch IS the gesture browsers need for audible YT
       celebrated=false; // allow re-testing
       triggerCelebration();
     }
     lastTap=now;
   }
-  testZone.addEventListener('dblclick', function(){ celebrated=false; triggerCelebration(); });
+  testZone.addEventListener('dblclick', function(){ pageInteracted=true; celebrated=false; triggerCelebration(); });
   testZone.addEventListener('touchend', handleDoubleTrigger);
 
 })();
