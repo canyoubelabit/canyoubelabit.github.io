@@ -9,6 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Lab &amp; Bella" />
 <meta name="theme-color" content="#ffd6e8" />
 <title>Paul &amp; Bella - Reunion Countdown</title>
+<!-- build: carousel-fix-20260930b -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%97%3C/text%3E%3C/svg%3E" />
 <link rel="apple-touch-icon" href="icon.png" />
 <style>
@@ -189,7 +190,7 @@
   }
   #celebration.show{ display:flex; }
 
-  #confettiCanvas{ position:fixed; inset:0; z-index:101; pointer-events:none; }
+  #confettiCanvas{ position:fixed; inset:0; z-index:101; pointer-events:none !important; }
 
   .cel-card{
     position:relative; z-index:102;
@@ -728,19 +729,27 @@ Lab you po.</p>
   /* ---------- confetti ---------- */
   var canvas=document.getElementById('confettiCanvas'), ctx=canvas.getContext('2d');
   var confettiPieces=[], confettiRunning=false;
-  function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
+  function resizeCanvas(){
+    if(!canvas) return;
+    canvas.width=window.innerWidth||320;
+    canvas.height=window.innerHeight||480;
+  }
   window.addEventListener('resize', resizeCanvas);
   resizeCanvas();
 
   var confettiColors=['#ff9ec7','#ffd6e8','#9cd0ff','#cfe9ff','#ffe1a8','#ffffff'];
   function launchConfetti(){
     if(reduceMotion) return;
+    if(!canvas || !ctx) return;
+    resizeCanvas();
+    var w=canvas.width||window.innerWidth||320;
+    var h=canvas.height||window.innerHeight||480;
     confettiPieces=[];
     var count=90;
     for(var i=0;i<count;i++){
       confettiPieces.push({
-        x:Math.random()*canvas.width,
-        y:-20-Math.random()*canvas.height*0.5,
+        x:Math.random()*w,
+        y:-20-Math.random()*h*0.5,
         r:4+Math.random()*6,
         c:confettiColors[Math.floor(Math.random()*confettiColors.length)],
         vy:2+Math.random()*3,
@@ -1152,36 +1161,13 @@ Lab you po.</p>
     if(!slides || slides.length<2) return;
     clearInterval(carouselTimer);
     if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
-    var activeVideo=slides[curSlide].querySelector('video');
-    if(activeVideo){
-      // Advance on ended/error, OR if autoplay is blocked (stays paused),
-      // OR after duration — so the carousel never gets stuck on a silent video.
-      var done=false;
-      var finish=function(){
-        if(done) return;
-        done=true;
-        if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
-        try{ activeVideo.removeEventListener('ended', finish); }catch(e){}
-        try{ activeVideo.removeEventListener('error', finish); }catch(e){}
-        goToSlide(curSlide+1);
-        startCarouselAuto();
-      };
-      activeVideo.addEventListener('ended', finish);
-      activeVideo.addEventListener('error', finish);
+    // Always advance on a fixed timer so a blocked video can never freeze the show.
+    // Videos still play while their slide is active; we just don't wait on 'ended'.
+    try{ playActiveVideoIfAny(); }catch(e){}
+    carouselTimer=setInterval(function(){
+      try{ goToSlide(curSlide+1); }catch(e){}
       try{ playActiveVideoIfAny(); }catch(e){}
-      var waitMs=15000;
-      try{
-        if(activeVideo.readyState>=1 && isFinite(activeVideo.duration) && activeVideo.duration>0){
-          waitMs=Math.ceil(activeVideo.duration*1000)+2000;
-        }
-      }catch(e){}
-      carouselVideoWatchdog=setTimeout(finish, waitMs);
-      setTimeout(function(){
-        try{ if(!done && activeVideo.paused) finish(); }catch(e){ finish(); }
-      }, 3000);
-    } else {
-      carouselTimer=setInterval(function(){ goToSlide(curSlide+1); startCarouselAuto(); }, 3200);
-    }
+    }, 3200);
   }
   updateProgress();
 
@@ -1253,23 +1239,21 @@ Lab you po.</p>
     // kick the carousel + any first-slide video immediately
     try{ playActiveVideoIfAny(); }catch(e){}
     try{ startCarouselAuto(); }catch(e){}
-    // Double-tap works because it IS a gesture. Timer fire is not — so if the
-    // visitor already tapped during the countdown, unmute like double-tap;
-    // otherwise arm a one-tap unlock on the overlay.
-    if(hasMediaGesture()){
-      applySoundOnUI();
-      if(soundOn) playChime();
-      startBackgroundMusic(true);
-      ensureYtPlaying(true);
-    } else {
-      startBackgroundMusic(true); // muted start if the browser allows
-      armCelebrationGestureMusic();
-    }
+    try{
+      if(hasMediaGesture()){
+        applySoundOnUI();
+        if(soundOn) playChime();
+        startBackgroundMusic(true);
+        ensureYtPlaying(true);
+      } else {
+        startBackgroundMusic(true);
+        armCelebrationGestureMusic();
+      }
+    }catch(e){}
     document.body.style.overflow='hidden';
-    // Past-target loads + blocked video autoplay used to leave the carousel frozen;
-    // kick once more on the next frame and again shortly after.
     requestAnimationFrame(function(){ try{ startCarouselAuto(); }catch(e){} });
-    setTimeout(function(){ try{ startCarouselAuto(); }catch(e){} }, 500);
+    setTimeout(function(){ try{ startCarouselAuto(); }catch(e){} }, 400);
+    setTimeout(function(){ try{ startCarouselAuto(); }catch(e){} }, 1200);
   }
   document.getElementById('closeCel').addEventListener('click', function(){
     celebration.classList.remove('show');
