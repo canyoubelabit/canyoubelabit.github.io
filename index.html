@@ -702,7 +702,8 @@ Lab you po.</p>
   }
 
   var timer=setInterval(render,1000);
-  render();
+  // NOTE: do NOT call render() here — when the target is already past, it would
+  // triggerCelebration() before slides/button listeners exist and abort the script.
 
   /* ---------- floating hearts background ---------- */
   var heartField=document.getElementById('heartField');
@@ -1148,7 +1149,7 @@ Lab you po.</p>
   }
   var carouselVideoWatchdog=null;
   function startCarouselAuto(){
-    if(slides.length<2) return;
+    if(!slides || slides.length<2) return;
     clearInterval(carouselTimer);
     if(carouselVideoWatchdog){ clearTimeout(carouselVideoWatchdog); carouselVideoWatchdog=null; }
     var activeVideo=slides[curSlide].querySelector('video');
@@ -1231,39 +1232,27 @@ Lab you po.</p>
 
   /* ---------- celebration trigger ---------- */
   function armCelebrationGestureMusic(){
-    // No prior gesture (pure timer fire): first tap/click anywhere on the
-    // overlay starts songs the same way double-tap does.
-    if(celebration.dataset.musicArmed==='1') return;
-    celebration.dataset.musicArmed='1';
-    function unlock(e){
-      // Never intercept real controls — otherwise the sound button's own
-      // handler toggles sound right back off after we turn it on.
-      if(e && e.target && e.target.closest){
-        if(e.target.closest('#closeCel, #soundToggle, .video-mute, button, a, input')) return;
-      }
-      celebration.removeEventListener('pointerdown', unlock, true);
-      celebration.removeEventListener('touchstart', unlock, true);
-      celebration.removeEventListener('click', unlock, true);
-      celebration.dataset.musicArmed='0';
-      pageInteracted=true;
-      applySoundOnUI();
-      playChime();
-      startBackgroundMusic(true);
-      ensureYtPlaying(true);
-    }
-    celebration.addEventListener('pointerdown', unlock, true);
-    celebration.addEventListener('touchstart', unlock, {capture:true, passive:true});
-    celebration.addEventListener('click', unlock, true);
+    // Do not install overlay-wide capture listeners — they fight button clicks.
+    // Pulse the sound control so a single intentional tap starts the songs.
+    if(soundToggle) soundToggle.classList.add('sound-pulse');
+    var hint=document.getElementById('soundHint');
+    if(hint) hint.style.display='';
   }
   function triggerCelebration(){
     if(celebrated) return;
+    // If called before carousel wiring (should not happen after deferred render),
+    // wait a tick instead of throwing and killing the rest of the script.
+    if(typeof slides==='undefined' || !slides || !slides.length){
+      setTimeout(triggerCelebration, 0);
+      return;
+    }
     celebrated=true;
     clearInterval(timer);
     celebration.classList.add('show');
-    launchConfetti();
+    try{ launchConfetti(); }catch(e){}
     // kick the carousel + any first-slide video immediately
     try{ playActiveVideoIfAny(); }catch(e){}
-    startCarouselAuto();
+    try{ startCarouselAuto(); }catch(e){}
     // Double-tap works because it IS a gesture. Timer fire is not — so if the
     // visitor already tapped during the countdown, unmute like double-tap;
     // otherwise arm a one-tap unlock on the overlay.
@@ -1303,6 +1292,9 @@ Lab you po.</p>
   }
   testZone.addEventListener('dblclick', function(){ pageInteracted=true; celebrated=false; triggerCelebration(); });
   testZone.addEventListener('touchend', handleDoubleTrigger);
+
+  // Start countdown (or open celebration) only after all listeners/carousel exist
+  render();
 
 })();
 </script>
