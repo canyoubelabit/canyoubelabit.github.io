@@ -411,7 +411,7 @@
     <div class="line"></div>
   </div>
 
-  <div class="date-pill">Reunion set for <b>Sept 30, 2026</b> · 12:44 AM AEST</div>
+  <div class="date-pill">Reunion set for <b>Sept 30, 2026</b> · 12:47 AM AEST</div>
 </main>
 
 <footer class="tag">made with every bit of my heart, for you 🩷🩵</footer>
@@ -643,8 +643,9 @@ Lab you po.</p>
 <style>
   /* Keep YT iframes off the hit-test tree — parent pointer-events:none is NOT inherited by the iframe. */
   #ytPlayerA, #ytPlayerB{
-    position:fixed !important; left:-9999px !important; top:0 !important;
-    width:1px !important; height:1px !important; opacity:0 !important;
+    /* keep in-viewport: off-screen / display:none players often refuse to play */
+    position:fixed !important; left:0 !important; bottom:0 !important;
+    width:1px !important; height:1px !important; opacity:0.01 !important;
     pointer-events:none !important; overflow:hidden !important; z-index:-1 !important;
   }
   #ytPlayerA iframe, #ytPlayerB iframe{
@@ -658,8 +659,8 @@ Lab you po.</p>
 (function(){
   "use strict";
 
-  /* ---------- target time: Sept 30 2026 00:44:00 AEST (UTC+10, fixed offset) ---------- */
-  var TARGET_UTC_MS = Date.UTC(2026,8,29,14,44,0); // Sep 30 00:44 AEST = Sep 29 14:44 UTC
+  /* ---------- target time: Sept 30 2026 00:47:00 AEST (UTC+10, fixed offset) ---------- */
+  var TARGET_UTC_MS = Date.UTC(2026,8,29,14,47,0); // Sep 30 00:47 AEST = Sep 29 14:47 UTC
 
   var dDays=document.getElementById('dDays'),
       dHours=document.getElementById('dHours'),
@@ -817,13 +818,13 @@ Lab you po.</p>
     playerA=new YT.Player('ytPlayerA', {
       height:'1', width:'1',
       videoId:YT_VIDEO_IDS[0],
-      playerVars:{ autoplay:0, controls:0, rel:0, playsinline:1 },
+      playerVars:{ autoplay:0, controls:0, rel:0, playsinline:1, modestbranding:1, disablekb:1 },
       events:{ onReady:function(){ aReady=true; onBothMaybeReady(); } }
     });
     playerB=new YT.Player('ytPlayerB', {
       height:'1', width:'1',
       videoId:YT_VIDEO_IDS[1],
-      playerVars:{ autoplay:0, controls:0, rel:0, playsinline:1 },
+      playerVars:{ autoplay:0, controls:0, rel:0, playsinline:1, modestbranding:1, disablekb:1 },
       events:{ onReady:function(){ bReady=true; onBothMaybeReady(); } }
     });
   };
@@ -906,24 +907,43 @@ Lab you po.</p>
   }
 
   var pendingForceAudible=false;
+  function ensureYtPlaying(audible){
+    var p=activePlayer();
+    if(!p || !p.playVideo) return;
+    try{
+      // muted start is what browsers reliably allow without a gesture
+      if(audible){
+        p.unMute();
+        p.setVolume(MASTER_VOLUME);
+      } else {
+        p.mute();
+        p.setVolume(0);
+      }
+      p.playVideo();
+      // re-assert after a beat — iOS/Safari often ignores the first unmute
+      setTimeout(function(){
+        try{
+          if(audible){ p.unMute(); p.setVolume(MASTER_VOLUME); p.playVideo(); }
+          else { p.mute(); }
+        }catch(e){}
+      }, 250);
+    }catch(e){}
+  }
   function startBackgroundMusic(forceAudible){
     if(!bothReady()){ ytStartQueued=true; pendingForceAudible=!!forceAudible; return; }
     musicWanted=true;
-    var p=activePlayer();
+    var wantAudible = !!forceAudible && (soundOn || pageInteracted);
     try{
-      if(forceAudible){
-        // countdown just ended: try to autoplay WITH sound (only actually works
-        // if the visitor has already interacted with the page at some point,
-        // which browsers require before allowing audible autoplay)
-        p.playVideo();
-        p.unMute();
-        p.setVolume(MASTER_VOLUME);
-        // verify shortly after whether the browser actually allowed it —
-        // don't just assume success, since a silently-blocked attempt would
-        // otherwise show a misleading "Turn Sound off" state
+      // Always begin muted so the track actually starts; then unmute if allowed
+      ensureYtPlaying(false);
+      if(wantAudible){
+        ensureYtPlaying(true);
         setTimeout(function(){
           var actuallyPlaying=false;
-          try{ actuallyPlaying = !p.isMuted() && p.getPlayerState()===1; }catch(e){}
+          try{
+            var p=activePlayer();
+            actuallyPlaying = p && !p.isMuted() && p.getPlayerState()===1;
+          }catch(e){}
           if(actuallyPlaying){
             soundOn=true;
             if(soundToggle){
@@ -932,14 +952,13 @@ Lab you po.</p>
             }
             var hint=document.getElementById('soundHint');
             if(hint) hint.style.display='none';
+          } else if(soundToggle){
+            // keep the tap affordance obvious
+            soundToggle.classList.add('sound-pulse');
           }
-          // if it didn't actually start, leave soundOn/false and the pulsing
-          // "Turn Sound on" button + hint visible so she can tap it herself
-        }, 600);
-      } else {
-        p.mute();
-        p.playVideo();
-        if(soundOn){ setTimeout(function(){ try{ p.unMute(); p.setVolume(MASTER_VOLUME); }catch(e){} }, 150); }
+        }, 700);
+      } else if(soundToggle){
+        soundToggle.classList.add('sound-pulse');
       }
     }catch(e){ /* fail silently */ }
     startPolling();
@@ -995,7 +1014,10 @@ Lab you po.</p>
     if(hint) hint.style.display='none';
     if(soundOn){
       playChime();
-      try{ var p=activePlayer(); if(p && p.unMute){ p.unMute(); p.setVolume(MASTER_VOLUME); } }catch(e){}
+      // this click IS the user gesture browsers require for audible media
+      musicWanted=true;
+      if(!bothReady()){ ytStartQueued=true; pendingForceAudible=true; loadYouTubeAPI(); }
+      else { ensureYtPlaying(true); startPolling(); }
     } else {
       try{ if(playerA && playerA.mute){ playerA.mute(); playerA.setVolume(0); } }catch(e){}
       try{ if(playerB && playerB.mute){ playerB.mute(); playerB.setVolume(0); } }catch(e){}
